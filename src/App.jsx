@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, PlusCircle, MapPin, User, FileText, CheckCircle, Wallet, Trash2, X, Filter, Clock, AlertTriangle, Lock } from 'lucide-react';
+import { Search, PlusCircle, MapPin, User, FileText, CheckCircle, Wallet, Trash2, X, Filter, Clock, AlertTriangle, Lock, Mic } from 'lucide-react'; // Đã thêm icon Mic
 
 // --- 1. KẾT NỐI GOOGLE FIREBASE ---
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 
-// 👇 BẠN HÃY THAY ĐOẠN CONFIG NÀY BẰNG MÃ BẠN LẤY TỪ FIREBASE BƯỚC 2 NHÉ 👇
+// Mã cấu hình Firebase của bạn
 const firebaseConfig = {
   apiKey: "AIzaSyCJvASEh_kfQcOyDB89VOzVlTOId8-2Y9U",
   authDomain: "ghino-7a25c.firebaseapp.com",
@@ -16,15 +16,12 @@ const firebaseConfig = {
   measurementId: "G-C0KDP1FNNR"
 };
 
-// Khởi tạo Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const debtsCollection = collection(db, 'debts'); // Tên bảng dữ liệu là 'debts'
+const debtsCollection = collection(db, 'debts');
 
-// --- CÀI ĐẶT MÃ PIN BẢO MẬT KHÓA MÀN HÌNH ---
 const SECRET_PIN = "6868"; 
 
-// --- HÀM HỖ TRỢ LỌC TIẾNG VIỆT KHÔNG DẤU ---
 const removeAccents = (str) => {
   if (!str) return '';
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
@@ -40,14 +37,12 @@ const getMonthsElapsed = (dateStr) => {
 };
 
 export default function DebtTracker() {
-  // --- STATE KHÓA MÀN HÌNH ---
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  // --- STATE LƯU TRỮ DỮ LIỆU ĐÁM MÂY ---
   const [debts, setDebts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true); // Thêm state chờ tải dữ liệu
+  const [isLoading, setIsLoading] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLocation, setFilterLocation] = useState('Tất cả');
@@ -56,32 +51,28 @@ export default function DebtTracker() {
   const [currentPage, setCurrentPage] = useState(1);
   const RECORDS_PER_PAGE = 8;
 
+  // --- STATE QUẢN LÝ MICROPHONE ---
+  const [isListening, setIsListening] = useState(false);
+
   const [formData, setFormData] = useState({
     name: '', location: '', amount: '', note: ''
   });
 
-  // --- 2. LẤY DỮ LIỆU THỰC TẾ (REAL-TIME) TỪ FIREBASE ---
   useEffect(() => {
-    // onSnapshot giúp dữ liệu cập nhật ngay lập tức nếu có thay đổi trên server
     const unsubscribe = onSnapshot(debtsCollection, (snapshot) => {
       const debtsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      // Sắp xếp người mới thêm lên đầu
       debtsData.sort((a, b) => b.createdAt - a.createdAt);
       setDebts(debtsData);
       setIsLoading(false);
     }, (error) => {
-      console.error("Lỗi khi tải dữ liệu:", error);
       alert("Lỗi mạng! Không thể kết nối với máy chủ.");
     });
-
-    // Hủy lắng nghe khi thoát app
     return () => unsubscribe();
   }, []);
 
-  // Các xử lý tự động
   useEffect(() => { setCurrentPage(1); }, [searchTerm, filterLocation, filterTime]);
 
   const formatLocationName = (loc) => {
@@ -124,7 +115,50 @@ export default function DebtTracker() {
 
   const totalDebt = debts.filter(d => !d.isPaid).reduce((sum, d) => sum + Number(d.amount), 0);
 
-  // --- 3. CÁC HÀM XỬ LÝ DATABASE ĐÁM MÂY ---
+  // --- HÀM XỬ LÝ NHẬN DIỆN GIỌNG NÓI (VOICE TO TEXT) ---
+  const startListening = () => {
+    // Kiểm tra xem trình duyệt có hỗ trợ nhận diện giọng nói không
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Trình duyệt điện thoại của mẹ không hỗ trợ nhận diện giọng nói. Hãy dùng Google Chrome nhé!");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'vi-VN'; // Bắt buộc ngôn ngữ Tiếng Việt
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      // Lấy kết quả giọng nói chuyển thành chữ
+      const transcript = event.results[0][0].transcript;
+      
+      // Ghép nội dung vừa nói vào ô ghi chú (nếu ô đã có chữ thì thêm dấu cách rồi ghép tiếp)
+      setFormData(prev => ({
+        ...prev, 
+        note: prev.note ? prev.note + ' ' + transcript : transcript
+      }));
+    };
+
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      if (event.error !== 'no-speech') {
+        alert("Có lỗi khi thu âm: " + event.error);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    // Bắt đầu thu âm
+    recognition.start();
+  };
+
   const handleLogin = (e) => {
     e.preventDefault();
     if (pinInput === SECRET_PIN) {
@@ -145,11 +179,10 @@ export default function DebtTracker() {
       note: formData.note,
       isPaid: false,
       date: new Date().toLocaleDateString('vi-VN'),
-      createdAt: Date.now() // Dùng để sắp xếp
+      createdAt: Date.now()
     };
 
     try {
-      // Đẩy dữ liệu lên Firebase
       await addDoc(debtsCollection, newDebt);
       setFormData({ name: '', location: '', amount: '', note: '' }); 
       setIsFormOpen(false); 
@@ -161,7 +194,6 @@ export default function DebtTracker() {
 
   const togglePaidStatus = async (id, currentStatus) => {
     try {
-      // Cập nhật trạng thái trả nợ trên Firebase
       const debtDoc = doc(db, 'debts', id);
       await updateDoc(debtDoc, { isPaid: !currentStatus });
     } catch (error) {
@@ -172,7 +204,6 @@ export default function DebtTracker() {
   const deleteDebt = async (id) => {
     if (window.confirm("Mẹ có chắc chắn muốn xóa hẳn người này khỏi sổ không? Dữ liệu sẽ mất vĩnh viễn!")) {
       try {
-        // Xóa hoàn toàn trên Firebase
         const debtDoc = doc(db, 'debts', id);
         await deleteDoc(debtDoc);
         if (currentDebts.length === 1 && currentPage > 1) setCurrentPage(currentPage - 1);
@@ -343,6 +374,7 @@ export default function DebtTracker() {
         <span style={{ fontSize: '1.3rem', fontWeight: 'bold' }}>THÊM SỔ NỢ MỚI</span>
       </button>
 
+      {/* --- FORM NHẬP LIỆU CẬP NHẬT GHI ÂM GIỌNG NÓI --- */}
       {isFormOpen && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
@@ -374,10 +406,43 @@ export default function DebtTracker() {
                   </div>
                 )}
               </div>
+              
+              {/* KHU VỰC GHI CHÚ BẰNG GIỌNG NÓI */}
               <div>
-                <label style={styles.label}>Ghi chú thêm (Không bắt buộc):</label>
-                <textarea rows="3" style={styles.input} placeholder="Hẹn đầu tháng trả, mượn mua đồ..." value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ ...styles.label, margin: 0 }}>Ghi chú thêm:</label>
+                  
+                  {/* Nút bấm để nói */}
+                  <button 
+                    type="button" 
+                    onClick={startListening}
+                    style={{
+                      background: isListening ? '#ef4444' : '#ecfdf5',
+                      color: isListening ? '#fff' : '#10b981',
+                      border: isListening ? 'none' : '1px solid #10b981',
+                      padding: '8px 12px',
+                      borderRadius: '20px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      fontWeight: 'bold',
+                      animation: isListening ? 'pulse 1.5s infinite' : 'none'
+                    }}
+                  >
+                    <Mic size={18} /> {isListening ? 'Đang nghe...' : 'Bấm để nói'}
+                  </button>
+                </div>
+                <textarea 
+                  rows="3" 
+                  style={{...styles.input, marginTop: 0, borderColor: isListening ? '#10b981' : '#d1d5db'}} 
+                  placeholder="Hẹn đầu tháng trả, mượn mua đồ... (Có thể gõ hoặc bấm nút nói)" 
+                  value={formData.note} 
+                  onChange={e => setFormData({...formData, note: e.target.value})} 
+                />
               </div>
+
               <button type="submit" style={styles.saveBtn}>LƯU VÀO SỔ NGAY</button>
             </form>
           </div>
